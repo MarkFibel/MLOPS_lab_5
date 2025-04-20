@@ -1,2 +1,4 @@
 main.py
 .gitignore
+*.DS_Store
+*.txt
