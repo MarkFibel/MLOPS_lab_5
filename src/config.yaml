@@ -16,11 +16,11 @@ data_split:
   testset_path: "data/test_german.csv"
 
 train:
-  model_type: "random_forest"          # Возможные варианты: 'tree', 'logreg', 'random_forest'
+  model_type: "tree"          # Возможные варианты: 'tree', 'logreg', 'random_forest'
   cv: 4                                # Кросс-валидация
   alpha: [0.0001, 0.001, 0.01, 0.05, 0.5]   # Для моделей с регуляризацией
   n_estimators: [100, 300, 500, 800]   # Количество деревьев
-  max_depth: [None, 5, 10, 20]         # Глубина деревьев
+  max_depth: [5, 10, 20]         # Глубина деревьев
   random_state: 42
   model_path: "models/german.joblib"
   power_path: "models/power.joblib"

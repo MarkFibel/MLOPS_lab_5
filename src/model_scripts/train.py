@@ -12,6 +12,8 @@ from sklearn.linear_model import SGDRegressor, LogisticRegression
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.tree import DecisionTreeClassifier
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score, accuracy_score
+from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, roc_auc_score
+
 
 def eval_metrics(actual, pred, task="regression"):
     if task == "regression":
@@ -21,7 +23,11 @@ def eval_metrics(actual, pred, task="regression"):
         return {"rmse": rmse, "mae": mae, "r2": r2}
     elif task == "classification":
         acc = accuracy_score(actual, pred)
-        return {"accuracy": acc}
+        precision = precision_score(actual, pred)
+        recall = recall_score(actual, pred)
+        f1 = f1_score(actual, pred)
+        auc = roc_auc_score(actual, pred)
+        return {"accuracy": acc, "precision": precision, "recall": recall, "f1": f1, "auc": auc}
 
 def train(config):
     # Load training and testing datasets
@@ -100,8 +106,9 @@ def train(config):
         ('model', model)
     ])
 
-    mlflow.set_experiment("Creditability Prediction")
+    mlflow.set_experiment("Creditability")
     with mlflow.start_run():
+        print("MLflow run started!")
         # Обучение модели с GridSearchCV
         clf = GridSearchCV(pipeline, param_grid, cv=config['train']['cv'], n_jobs=4)
         clf.fit(X_train, y_train)
@@ -114,11 +121,4 @@ def train(config):
         for k, v in metrics.items():
             mlflow.log_metric(k, v)
         print("Metrics:", metrics)
-
-        # Log model
-        signature = infer_signature(X_train, y_pred)
-        mlflow.sklearn.log_model(best_model, "model", signature=signature)
-
-        # Save model
-        with open(config['train']['model_path'], "wb") as f:
-            pickle.dump(best_model, f)
+        
