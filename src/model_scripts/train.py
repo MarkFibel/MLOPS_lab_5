@@ -1,21 +1,27 @@
 import pandas as pd
 import numpy as np
+import pickle
+import mlflow
+from mlflow.models import infer_signature
+
 from sklearn.preprocessing import StandardScaler, PowerTransformer, OneHotEncoder
 from sklearn.compose import ColumnTransformer
 from sklearn.model_selection import GridSearchCV
 from sklearn.pipeline import Pipeline
-from sklearn.linear_model import SGDRegressor
-from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
-import mlflow
-from mlflow.models import infer_signature
-import pickle
+from sklearn.linear_model import SGDRegressor, LogisticRegression
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.tree import DecisionTreeClassifier
+from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score, accuracy_score
 
-def eval_metrics(actual, pred):
-    """Calculate evaluation metrics."""
-    rmse = np.sqrt(mean_squared_error(actual, pred))
-    mae = mean_absolute_error(actual, pred)
-    r2 = r2_score(actual, pred)
-    return rmse, mae, r2
+def eval_metrics(actual, pred, task="regression"):
+    if task == "regression":
+        rmse = np.sqrt(mean_squared_error(actual, pred))
+        mae = mean_absolute_error(actual, pred)
+        r2 = r2_score(actual, pred)
+        return {"rmse": rmse, "mae": mae, "r2": r2}
+    elif task == "classification":
+        acc = accuracy_score(actual, pred)
+        return {"accuracy": acc}
 
 def train(config):
     # Load training and testing datasets
@@ -31,52 +37,88 @@ def train(config):
     X_val = df_test.drop(columns=['Creditability'])
     y_val = df_test['Creditability']
 
-    # Preprocessing pipeline
+    # Identify feature types
     numeric_features = X_train.select_dtypes(include=['int64', 'float64']).columns.tolist()
     categorical_features = X_train.select_dtypes(include=['object']).columns.tolist()
 
-    # Create column transformer for preprocessing
-    preprocessor = ColumnTransformer(
-        transformers=[
-            ('num', StandardScaler(), numeric_features),
-            ('cat', OneHotEncoder(handle_unknown='ignore'), categorical_features)
-        ]
-    )
+    # Preprocessing steps
+    transformers = []
 
-    # Define the pipeline
+    if config['featurize'].get('scale_features', True):
+        transformers.append(('num', StandardScaler(), numeric_features))
+
+    if config['featurize'].get('encode_categoricals', True) and categorical_features:
+        transformers.append(('cat', OneHotEncoder(handle_unknown='ignore'), categorical_features))
+
+    preprocessor = ColumnTransformer(transformers)
+
+    # PowerTransformer (логгируем отдельно, как требует config)
+    pt = PowerTransformer()
+    X_train_scaled = pt.fit_transform(X_train[numeric_features])
+    with open(config['train']['power_path'], "wb") as f:
+        pickle.dump(pt, f)
+
+    # Выбор модели
+    model_type = config['train'].get('model_type', 'tree')
+    param_grid = {}
+
+    if model_type == "random_forest":
+        param_grid = {
+            "model__n_estimators": config["train"].get("n_estimators", [100]),
+            "model__max_depth": config["train"].get("max_depth", [None]),
+        }
+
+    elif model_type == "logreg":
+        param_grid = {
+            "model__C": config["train"].get("C", [0.01, 0.1, 1.0]),
+            "model__penalty": config["train"].get("penalty", ["l2"]),
+        }
+
+    elif model_type == "tree":
+        param_grid = {
+            "model__max_depth": config["train"].get("max_depth", [None]),
+        }
+
+    elif model_type == "sgd":
+        param_grid = {
+            "model__alpha": config["train"].get("alpha", [0.0001]),
+            "model__fit_intercept": [True, False],
+        }
+    
+    if model_type == "tree":
+        model = DecisionTreeClassifier(random_state=config['train'].get('random_state', 42))
+    elif model_type == "logreg":
+        model = LogisticRegression(max_iter=1000, random_state=config['train'].get('random_state', 42))
+    elif model_type == "random_forest":
+        model = RandomForestClassifier(random_state=config['train'].get('random_state', 42))
+    else:
+        raise ValueError(f"Unsupported model type: {model_type}")
+
+    # Pipeline
     pipeline = Pipeline(steps=[
         ('preprocessor', preprocessor),
-        ('model', SGDRegressor(random_state=42))
+        ('model', model)
     ])
 
-    # Set up MLflow experiment tracking
     mlflow.set_experiment("Creditability Prediction")
     with mlflow.start_run():
-        params = {'model__alpha': config['train']['alpha'],
-                  'model__fit_intercept': [False, True]}
-        
-        # Hyperparameter tuning with GridSearchCV
-        clf = GridSearchCV(pipeline, params, cv=config['train']['cv'], n_jobs=4)
+        # Обучение модели с GridSearchCV
+        clf = GridSearchCV(pipeline, param_grid, cv=config['train']['cv'], n_jobs=4)
         clf.fit(X_train, y_train)
 
-        # Best model prediction
         best_model = clf.best_estimator_
         y_pred = best_model.predict(X_val)
 
-        # Evaluation metrics
-        (rmse, mae, r2) = eval_metrics(y_val, y_pred)
-        
-        # Log metrics to MLflow
-        mlflow.log_metric("rmse", rmse)
-        mlflow.log_metric("mae", mae)
-        mlflow.log_metric("r2", r2)
+        # Метрики
+        metrics = eval_metrics(y_val, y_pred, task="classification")
+        for k, v in metrics.items():
+            mlflow.log_metric(k, v)
+        print("Metrics:", metrics)
 
-        print(f"R2: {r2}")
-
-        # Log signature and model
+        # Log model
         signature = infer_signature(X_train, y_pred)
         mlflow.sklearn.log_model(best_model, "model", signature=signature)
 
-        # Save the pipeline
-        with open(config['train']['model_path'], "wb") as file:
-            pickle.dump(best_model, file)
+        # Save model
+        with open(config['train']['model_path'], "wb") as f:
+            pickle.dump(best_model, f)

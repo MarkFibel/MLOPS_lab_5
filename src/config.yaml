@@ -1,20 +1,42 @@
 data_load:
-  dataset_csv: "data/german.csv"
+  dataset_csv: "data/german.csv"        # Исходный датасет
+
 featurize:
-  features_path: "data/final.csv"
+  features_path: "data/final.csv"       # Путь для сохранения данных с новыми признаками
+  add_interactions: true                # Генерировать ли взаимодействия между признаками
+  scale_features: true                  # Масштабировать ли числовые признаки
+  encode_categoricals: true             # Кодировать ли категориальные признаки
+
 data_split:
-  test_size: 0.3
+  test_size: 0.3                        # Размер тестовой выборки
+  random_state: 42                     # Для воспроизводимости
+  shuffle: true
+  stratify_by: "Creditability"         # Стратификация по целевой переменной
   trainset_path: "data/train_german.csv"
   testset_path: "data/test_german.csv"
+
 train:
-  cv: 4
-  model_type: "tree"
-  alpha: [0.0001, 0.001, 0.01, 0.05, 0.5]
-  n_estimators: [800]
+  model_type: "random_forest"          # Возможные варианты: 'tree', 'logreg', 'random_forest'
+  cv: 4                                # Кросс-валидация
+  alpha: [0.0001, 0.001, 0.01, 0.05, 0.5]   # Для моделей с регуляризацией
+  n_estimators: [100, 300, 500, 800]   # Количество деревьев
+  max_depth: [None, 5, 10, 20]         # Глубина деревьев
+  random_state: 42
   model_path: "models/german.joblib"
   power_path: "models/power.joblib"
+
 test:
   model_path: "models/german.joblib"
   power_path: "models/power.joblib"
   testset_path: "data/test_german.csv"
-  
+  output_metrics_path: "reports/test_metrics.json"  # Для сохранения метрик
+
+evaluate:
+  save_confusion_matrix: true
+  save_classification_report: true
+  output_dir: "reports/"
+  roc_curve_path: "reports/roc_curve.png"
+
+logging:
+  log_path: "logs/experiment.log"
+  log_level: "INFO"
